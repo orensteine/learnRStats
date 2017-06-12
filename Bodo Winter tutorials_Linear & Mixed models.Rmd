@@ -1,0 +1,189 @@
+---
+title: "Linear Model - Bodo Winter"
+output: html_notebook
+---
+
+This notebook walks through Bodo Winter's tutorials on linear and mixed models in R 
+Tutorial 1: http://www.bodowinter.com/tutorial/bw_LME_tutorial1.pdf
+Tutorial 2: http://www.bodowinter.com/tutorial/bw_LME_tutorial2.pdf
+
+To execute code, click the *Run* button within the chunk or place your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+pitch = c(233, 204, 242, 130, 112, 142)
+sex = c(rep("female",3), rep("male", 3))
+
+my.df = data.frame(sex, pitch)
+my.df
+```
+
+Define our first linear model
+
+```{r}
+xmdl = lm(pitch ~ sex, my.df)
+summary(xmdl)
+```
+
+Learn notation for doing math on a subset of a dataframe
+```{r}
+mean(my.df[my.df$sex=="female",]$pitch)
+mean(my.df[my.df$sex=="male",]$pitch)
+```
+
+Build a second linear model for pitch ~ age
+```{r}
+age = c(14, 23, 35, 48, 52, 67)
+pitch = c(252, 244, 240, 233, 212, 204)
+my.newdf = data.frame(age, pitch)
+xmdl = lm(pitch ~ age, my.newdf)
+summary(xmdl)
+dfbeta(xmdl)
+```
+
+Define a second linear model
+```{r}
+my.newdf$age.c = my.newdf$age - mean(my.newdf$age)
+my.newdf$age.c
+
+xmdl = lm(pitch ~ age.c, my.newdf)
+summary(xmdl)
+```
+
+
+Create a linear model with multiple predictors using some of the data already in our existing dataframes.  Plot fitted vs. residuals and qqnorm plot of residuals.
+
+```{r}
+my.thirddf = data.frame(my.df$sex, my.newdf$age, my.newdf$pitch)
+my.thirddf
+
+xmdl = lm(pitch ~ sex + age, my.thirddf)
+summary(xmdl)
+
+plot(fitted(xmdl), residuals(xmdl))
+qqnorm(residuals(xmdl))
+```
+
+***********NOW SWITCHING TO TUTORIAL 2****************
+
+First we need to install lme4 package:
+```{r}
+install.packages("lme4")
+library(lme4)
+```
+
+Cool.  Now we have the functoin lmer() available to us, which is similar to lm() from Tutorial 1.
+
+Let's load the data from Bodo Winter's server:
+```{r}
+politeness=
+read.csv("http://www.bodowinter.com/tutorial/politeness_data.csv")
+summary(politeness)
+politeness
+```
+
+Let's see what data are missing:
+
+```{r}
+which(is.na(politeness$frequency))
+which(!complete.cases(politeness))
+```
+
+We are planning to use gender and attitude as our "fixed effects" and scenario and subject as our "random effects".  Let's see how things look for our fixed effects by making box plots by attitude and gender:
+
+```{r}
+boxplot(frequency ~ attitude*gender, col=c("white","gray"), politeness)
+```
+Looks like gender makes a big difference, but informal vs. polite might make a difference as well.
+
+Let's learn how to use the lmer function:
+```{r}
+?lmer
+```
+
+See information in the help section to the right - we can also just enter directly into that search box.
+
+If we try to use lmer to create a linear model with no random effects, we get an error:
+```{r}
+lmer(frequency ~ attitude, data=politeness)
+```
+
+We add random effects terms with the syntax: (1|variable).  So let's add our random effects in (subject and scenario):
+
+```{r}
+politeness.model = lmer(frequency ~ attitude + gender + (1|subject) + (1|scenario), data=politeness)
+summary(politeness.model)
+```
+
+Cool.  Looks like attitude (polite or informal) had an effect on pitch, but how do we test for signficance?  The plan is to create this model with and without attitude as a fixed effect and then do an anova comparing the two models.  Note for reasons that I don't fully understand, we have to say REML=false, which will optimize the log-likelihood criterion instead of the REML criterion.
+
+```{r}
+politeness.null = lmer(frequency ~ gender + (1|subject) + (1|scenario), data = politeness, REML=FALSE)
+politeness.model = lmer(frequency ~ attitude + gender + (1|subject) + (1|scenario), data = politeness, REML=FALSE)
+anova(politeness.null, politeness.model)
+```
+
+Nice - so with p = 0.0006532, we can say that adding attitude to the model is significant.
+
+Let's look at what our mixed model did with coefficients:
+```{r}
+coef(politeness.model)
+```
+
+If we look at the coefficients, we see that we have a "random intercept" assigned for each scenario and each subject.  However, the coefficients for the fixed effects variabes remained constant.  However, it's possible that the effect of attitude differs by subject or scenario, i.e. one subject may change their pitch more for a polite vs. informal statement compared to someone else.  We may want to allow for "random slope" - where the slope can differ by subject and/or by scenario.  We can do that by altering each random effect to account for differences in attitude:
+
+```{r}
+politeness.RandSlopeModel = lmer(frequency ~ attitude + gender + (1+attitude|subject) + (1+attitude|scenario), data=politeness, REML=FALSE)
+summary(politeness.RandSlopeModel)
+coef(politeness.RandSlopeModel)
+```
+
+And now to complete the significance testing, we need the same model without attitude as a fixed effect, but still included as a random slope for the random effects:
+
+```{r}
+politeness.RandSlopeNull = lmer(frequency ~ gender + (1+attitude|subject) + (1+attitude|scenario), data=politeness, REML=FALSE)
+anova(politeness.RandSlopeNull, politeness.RandSlopeModel)
+```
+
+Significant still at p= 0.009597.  Nice.
+
+
+Note in our baby monitor study, we will have random effect of subject, fixed effects of skin pigmentation and age.  It is unlikely that any subject has different bias in pulse ox or pulse rate by skin pigmentation or age compared to another subject.  Thus, it probably does NOT make sense to include random slopes in our analysis.
+
+Ok, we still need to check some of our assumptions for any linear model.
+
+Let's look at a plot of fitted vs. residuals and a qqnorm plot of residuals to look for homoskedasticity and normality of residuals (although the latter is not so important):
+```{r}
+plot(fitted(politeness.RandSlopeModel), residuals(politeness.RandSlopeModel))
+qqnorm(residuals(politeness.RandSlopeModel))
+```
+
+Looks good!
+```{r}
+fixef(politeness.RandSlopeModel)[2]
+```
+
+```{r}
+politeness[-3,]
+
+```
+
+
+Let's look for influential data points by looping through the data, leaving one data point out at time, and seeing the impact on coefficients:
+```{r}
+all.res = numeric(nrow(politeness))
+for (i in 1:nrow(politeness)){
+  thisModel = lmer(frequency ~ attitude + gender + (1+attitude|subject) + (1+attitude|scenario), data=politeness[-i,], REML=FALSE)
+  all.res[i] = fixef(thisModel)[2]
+}
+all.res
+which.max(all.res)
+max(all.res)
+which.min(all.res)
+min(all.res)
+```
+
+No single point appears to be wildly influential.
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
